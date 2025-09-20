@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VLSI Project Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+        @apply bg-gray-100 text-gray-800;
+      }
+      .container-full-height {
+        height: calc(100vh - 4rem);
+      }
+      .code-editor {
+        font-family: "JetBrains Mono", "Courier New", monospace;
+        @apply bg-gray-900 text-green-300 rounded-lg p-4 leading-relaxed;
+        resize: none;
+        overflow: auto;
+      }
+      .project-list {
+        @apply bg-white rounded-lg shadow-lg overflow-y-auto;
+        max-height: calc(100vh - 12rem);
+      }
+    </style>
+  </head>
+  <body class="p-4 flex flex-col items-center">
+    <header
+      class="w-full max-w-7xl flex flex-col sm:flex-row justify-between items-center mb-6"
+    >
+      <h1 class="text-3xl font-bold text-gray-800 mb-2 sm:mb-0">
+        VLSI Project Editor
+      </h1>
+      <div class="text-sm text-gray-500">
+        <p>
+          Your User ID:
+          <span id="user-id" class="font-mono bg-gray-200 px-2 py-1 rounded-md"
+            >...</span
+          >
+        </p>
+      </div>
+    </header>
+
+    <main
+      id="app-container"
+      class="w-full max-w-7xl flex flex-col md:flex-row gap-6 container-full-height"
+    >
+      <!-- Project List Section -->
+      <aside class="w-full md:w-1/4 project-list">
+        <h2
+          class="text-xl font-bold p-4 border-b border-gray-200 sticky top-0 bg-white z-10"
+        >
+          Your Projects
+        </h2>
+        <ul id="project-list" class="p-4 space-y-2">
+          <!-- Project items will be dynamically added here -->
+        </ul>
+      </aside>
+
+      <!-- Code Editor & Actions Section -->
+      <section class="w-full md:w-3/4 flex flex-col h-full">
+        <div class="flex-grow flex flex-col bg-white rounded-lg shadow-lg p-6">
+          <input
+            id="project-name-input"
+            type="text"
+            placeholder="Project Name (e.g., Full Adder)"
+            class="text-xl font-bold mb-4 p-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <textarea
+            id="verilog-code-editor"
+            class="flex-grow code-editor focus:outline-none"
+            placeholder="Write your Verilog code here..."
+          ></textarea>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-4 mt-4 justify-end">
+          <button
+            id="new-project-btn"
+            class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-lg transition-colors"
+          >
+            New Project
+          </button>
+          <button
+            id="save-project-btn"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors"
+          >
+            Save Project
+          </button>
+          <button
+            id="delete-project-btn"
+            class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition-colors"
+          >
+            Delete Project
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal for Deletion Confirmation -->
+    <div
+      id="delete-modal"
+      class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center hidden"
+    >
+      <div class="bg-white rounded-lg shadow-xl p-6 w-11/12 max-w-md">
+        <h3 class="text-lg font-bold mb-4">Confirm Deletion</h3>
+        <p class="mb-6">
+          Are you sure you want to delete this project? This action cannot be
+          undone.
+        </p>
+        <div class="flex justify-end gap-4">
+          <button
+            id="cancel-delete-btn"
+            class="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            id="confirm-delete-btn"
+            class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast message for status updates -->
+    <div
+      id="toast-message"
+      class="fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-white text-sm transition-opacity duration-300 opacity-0"
+    ></div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+      // Firebase SDKs are imported as modules
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+      import {
+        getAuth,
+        signInAnonymously,
+        signInWithCustomToken,
+        onAuthStateChanged,
+      } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+      import {
+        getFirestore,
+        doc,
+        getDoc,
+        addDoc,
+        setDoc,
+        updateDoc,
+        deleteDoc,
+        onSnapshot,
+        collection,
+        query,
+        orderBy,
+        where,
+        serverTimestamp,
+      } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+      import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+      // Set Firebase log level for debugging
+      setLogLevel("debug");
+
+      // Global variables for Firebase instances
+      let app, db, auth;
+      let userId = null;
+      let currentProjectId = null;
+
+      // UI elements
+      const projectNameInput = document.getElementById("project-name-input");
+      const verilogCodeEditor = document.getElementById("verilog-code-editor");
+      const projectListUl = document.getElementById("project-list");
+      const newProjectBtn = document.getElementById("new-project-btn");
+      const saveProjectBtn = document.getElementById("save-project-btn");
+      const deleteProjectBtn = document.getElementById("delete-project-btn");
+      const userIdSpan = document.getElementById("user-id");
+      const deleteModal = document.getElementById("delete-modal");
+      const confirmDeleteBtn = document.getElementById("confirm-delete-btn");
+      const cancelDeleteBtn = document.getElementById("cancel-delete-btn");
+      const toastMessage = document.getElementById("toast-message");
+
+      // Firestore paths using the provided global variables
+      const appId =
+        typeof __app_id !== "undefined" ? __app_id : "default-app-id";
+      const firebaseConfig =
+        typeof __firebase_config !== "undefined"
+          ? JSON.parse(__firebase_config)
+          : {};
+      const initialAuthToken =
+        typeof __initial_auth_token !== "undefined"
+          ? __initial_auth_token
+          : null;
+
+      /**
+       * Initializes Firebase and authenticates the user.
+       */
+      const initializeFirebase = async () => {
+        try {
+          app = initializeApp(firebaseConfig);
+          db = getFirestore(app);
+          auth = getAuth(app);
+
+          // Sign in with the provided custom token or anonymously if not available.
+          if (initialAuthToken) {
+            await signInWithCustomToken(auth, initialAuthToken);
+          } else {
+            await signInAnonymously(auth);
+          }
+
+          // Listen for auth state changes and set the user ID.
+          onAuthStateChanged(auth, (user) => {
+            if (user) {
+              userId = user.uid;
+              userIdSpan.textContent = userId;
+              // Start listening for projects once the user is authenticated
+              listenForProjects();
+            } else {
+              userId = null;
+              userIdSpan.textContent = "Not authenticated";
+            }
+          });
+        } catch (error) {
+          console.error("Error initializing Firebase:", error);
+          showToast("Failed to initialize app.", "bg-red-600");
+        }
+      };
+
+      /**
+       * Displays a toast message to the user.
+       * @param {string} message - The message to display.
+       * @param {string} colorClass - Tailwind CSS background color class.
+       */
+      const showToast = (message, colorClass) => {
+        toastMessage.textContent = message;
+        toastMessage.className = `fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-white text-sm transition-opacity duration-300 opacity-100 ${colorClass}`;
+        setTimeout(() => {
+          toastMessage.className = toastMessage.className.replace(
+            "opacity-100",
+            "opacity-0"
+          );
+        }, 3000);
+      };
+
+      /**
+       * Renders the project list from an array of projects.
+       * @param {Array<Object>} projects - The list of projects.
+       */
+      const renderProjects = (projects) => {
+        projectListUl.innerHTML = "";
+        projects.forEach((project) => {
+          const li = document.createElement("li");
+          li.innerHTML = `
+                    <button data-id="${
+                      project.id
+                    }" class="w-full text-left p-3 rounded-md transition-colors hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                        <span class="font-medium">${project.name}</span>
+                        <span class="block text-xs text-gray-500 mt-1">Last updated: ${new Date(
+                          project.updated_at?.seconds * 1000
+                        ).toLocaleString()}</span>
+                    </button>
+                `;
+          li.querySelector("button").addEventListener("click", () => {
+            loadProject(project.id, project);
+          });
+          projectListUl.appendChild(li);
+        });
+      };
+
+      /**
+       * Listens for real-time updates to the user's projects in Firestore.
+       */
+      const listenForProjects = () => {
+        if (!userId) {
+          console.warn("User ID not available. Cannot listen for projects.");
+          return;
+        }
+
+        const projectsRef = collection(
+          db,
+          `artifacts/${appId}/users/${userId}/verilog_projects`
+        );
+        const q = query(projectsRef);
+
+        onSnapshot(
+          q,
+          (querySnapshot) => {
+            const projects = [];
+            querySnapshot.forEach((doc) => {
+              projects.push({ id: doc.id, ...doc.data() });
+            });
+            renderProjects(projects);
+            showToast("Projects list updated.", "bg-green-600");
+          },
+          (error) => {
+            console.error("Error listening to projects:", error);
+            showToast("Failed to fetch projects.", "bg-red-600");
+          }
+        );
+      };
+
+      /**
+       * Loads a project's data into the editor.
+       * @param {string} projectId - The ID of the project to load.
+       * @param {Object} projectData - The project data object.
+       */
+      const loadProject = (projectId, projectData) => {
+        currentProjectId = projectId;
+        projectNameInput.value = projectData.name;
+        verilogCodeEditor.value = projectData.verilog_code;
+        deleteProjectBtn.classList.remove("hidden");
+        showToast(`Project '${projectData.name}' loaded.`, "bg-green-600");
+      };
+
+      /**
+       * Saves the current project or creates a new one.
+       */
+      const saveProject = async () => {
+        if (!userId) {
+          showToast(
+            "Please wait for authentication to complete.",
+            "bg-yellow-600"
+          );
+          return;
+        }
+
+        const projectName = projectNameInput.value.trim();
+        const verilogCode = verilogCodeEditor.value;
+
+        if (!projectName) {
+          showToast("Project name cannot be empty.", "bg-yellow-600");
+          return;
+        }
+
+        showToast("Saving project...", "bg-gray-600");
+
+        try {
+          const projectData = {
+            name: projectName,
+            verilog_code: verilogCode,
+            updated_at: serverTimestamp(),
+          };
+
+          if (currentProjectId) {
+            // Update existing project
+            const projectRef = doc(
+              db,
+              `artifacts/${appId}/users/${userId}/verilog_projects`,
+              currentProjectId
+            );
+            await updateDoc(projectRef, projectData);
+            showToast("Project updated successfully!", "bg-blue-600");
+          } else {
+            // Create new project
+            projectData.created_at = serverTimestamp();
+            const projectsRef = collection(
+              db,
+              `artifacts/${appId}/users/${userId}/verilog_projects`
+            );
+            const newDocRef = await addDoc(projectsRef, projectData);
+            currentProjectId = newDocRef.id;
+            deleteProjectBtn.classList.remove("hidden");
+            showToast("New project created successfully!", "bg-green-600");
+          }
+        } catch (error) {
+          console.error("Error saving project:", error);
+          showToast("Failed to save project.", "bg-red-600");
+        }
+      };
+
+      /**
+       * Deletes the currently loaded project.
+       */
+      const deleteProject = async () => {
+        if (!currentProjectId) {
+          showToast("No project is currently selected.", "bg-yellow-600");
+          return;
+        }
+
+        showToast("Deleting project...", "bg-gray-600");
+        try {
+          const projectRef = doc(
+            db,
+            `artifacts/${appId}/users/${userId}/verilog_projects`,
+            currentProjectId
+          );
+          await deleteDoc(projectRef);
+          newProject();
+          showToast("Project deleted successfully!", "bg-red-600");
+        } catch (error) {
+          console.error("Error deleting project:", error);
+          showToast("Failed to delete project.", "bg-red-600");
+        }
+      };
+
+      /**
+       * Resets the editor for a new project.
+       */
+      const newProject = () => {
+        currentProjectId = null;
+        projectNameInput.value = "";
+        verilogCodeEditor.value = "";
+        deleteProjectBtn.classList.add("hidden");
+        showToast("Ready for a new project.", "bg-blue-600");
+      };
+
+      // Event listeners
+      newProjectBtn.addEventListener("click", newProject);
+      saveProjectBtn.addEventListener("click", saveProject);
+      deleteProjectBtn.addEventListener("click", () => {
+        deleteModal.classList.remove("hidden");
+      });
+      confirmDeleteBtn.addEventListener("click", () => {
+        deleteModal.classList.add("hidden");
+        deleteProject();
+      });
+      cancelDeleteBtn.addEventListener("click", () => {
+        deleteModal.classList.add("hidden");
+      });
+
+      // Initialize the app on window load
+      window.onload = initializeFirebase;
+    </script>
+  </body>
+</html>
